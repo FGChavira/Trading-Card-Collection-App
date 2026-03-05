@@ -82,8 +82,17 @@ def add_card():
         set_id = input("Set: ")
         rarity = input("Rarity: ")
         variant = input("Variant: ")
+        quantity = input("Quantity: ")
         save_tcg_card(
-            name, category, id_in_set, description, type, set_id, rarity, variant
+            name,
+            category,
+            id_in_set,
+            description,
+            type,
+            set_id,
+            rarity,
+            variant,
+            quantity,
         )
     elif choice == "2":
         name = input("Card Name: ")
@@ -158,7 +167,7 @@ def display_card(search):
 
 
 def save_tcg_card(
-    name, category, id_in_set, description, type, set_id, rarity, variant
+    name, category, id_in_set, description, type, set_id, rarity, variant, quantity
 ):
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -170,7 +179,17 @@ def save_tcg_card(
                         DO UPDATE SET
                             quantity = tcg_cards.quantity + 1
                         """,
-                (name, category, id_in_set, description, type, set_id, rarity, variant),
+                (
+                    name,
+                    category,
+                    id_in_set,
+                    description,
+                    type,
+                    set_id,
+                    rarity,
+                    variant,
+                    quantity,
+                ),
             )
             conn.commit()
     print(f"{name.title()} has been successfully added to your TCG collection.")
