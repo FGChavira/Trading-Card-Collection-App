@@ -108,7 +108,7 @@ def bulk_import_tcg(file_path):
                     cur.execute(
                         """
                                 INSERT INTO tcg_cards (name, category, id_in_set, rarity, set_id, quantity, variant)
-                                VALUES (%s, %s, %s, %s, %s, 1, %s)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s)
                                 ON CONFLICT (category, set_id, id_in_set, variant)
                                 DO UPDATE SET
                                     quantity = tcg_cards.quantity + 1;
@@ -165,7 +165,7 @@ def save_tcg_card(
             cur.execute(
                 """
                         INSERT INTO tcg_cards (name, category, id_in_set, description, type, set_id, rarity, variant, quantity)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 1)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (category, set_id, id_in_set, variant)
                         DO UPDATE SET
                             quantity = tcg_cards.quantity + 1
