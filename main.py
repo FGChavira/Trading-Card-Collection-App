@@ -46,19 +46,34 @@ def init_db():
                             CREATE TABLE IF NOT EXISTS sports_cards (
                             id SERIAL PRIMARY KEY,
                             name TEXT NOT NULL,
+                            players_featured TEXT NOT NULL,
                             sport TEXT NOT NULL,
                             id_in_set TEXT,
                             rarity TEXT,
                             rookie BOOLEAN DEFAULT FALSE,
                             team_name TEXT NOT NULL,
-                            set_id TEXT,
-                            condition TEXT,
+                            set_code TEXT NOT NULL,
+                            condition TEXT DEFAULT 'Near Mint',
                             parallel TEXT DEFAULT 'Base',
+                            type TEXT DEFAULT 'player',
                             quantity INTEGER DEFAULT 1,
                             acquired_on TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            CONSTRAINT unique_sports_card UNIQUE (sport, set_id, id_in_set, parallel)
+                            CONSTRAINT unique_sports_card UNIQUE (sport, set_code, id_in_set, parallel)
                             )
                         """
+                )
+                cur.execute(
+                    """
+                            CREATE TABLE IF NOT EXISTS sets (
+                            id SERIAL,
+                            set_code TEXT PRIMARY KEY,
+                            name TEXT NOT NULL,
+                            category TEXT NOT NULL,
+                            series TEXT DEFAULT 'N/A',
+                            manufacturer TEXT,
+                            release_date DATE,
+                            total_cards INTEGER)
+                    """
                 )
                 conn.commit()
                 print("Database initialized successfully.")
@@ -82,7 +97,7 @@ def add_card():
         set_id = input("Set: ")
         rarity = input("Rarity: ")
         variant = input("Variant: ")
-        quantity = input("Quantity: ")
+        quantity = int(input("Quantity: ") or 1)
         save_tcg_card(
             name,
             category,
@@ -96,15 +111,28 @@ def add_card():
         )
     elif choice == "2":
         name = input("Card Name: ")
+        players_featured = input("Featured Player(s): ")
         sport = input("Sport (e.g. Baseball, Basketball): ")
         id_in_set = input("ID in Set: ")
+        set_code = input("Set Code (2025-TOPPS-S1, etc.): ")
         team_name = input("Team Name: ")
         rookie = input("Is this a rookie card? (y/n): ").lower() == "y"
-        set_id = input("Set: ")
         rarity = input("Rarity: ")
         parallel = input("Parallel: ")
+        type = input("Card Type (player, team, event): ")
+        quantity = int(input("Quantity: ") or 1)
         save_sports_card(
-            name, sport, id_in_set, team_name, rookie, set_id, rarity, parallel
+            name,
+            players_featured,
+            sport,
+            id_in_set,
+            set_code,
+            team_name,
+            rookie,
+            rarity,
+            parallel,
+            type,
+            quantity,
         )
 
 
@@ -120,7 +148,7 @@ def bulk_import_tcg(file_path):
                                 VALUES (%s, %s, %s, %s, %s, %s, %s)
                                 ON CONFLICT (category, set_id, id_in_set, variant)
                                 DO UPDATE SET
-                                    quantity = tcg_cards.quantity + 1;
+                                    quantity = tcg_cards.quantity + EXCLUDED.quantity;
                                 """,
                         (
                             record["name"],
@@ -136,6 +164,38 @@ def bulk_import_tcg(file_path):
     print("Bulk cards have been imported.")
 
 
+def bulk_import_sports(file_path):
+    with open(file_path, mode="r", encoding="utf-8-sig") as bulk_file:
+        reader = csv.DictReader(bulk_file)
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                for record in reader:
+                    cur.execute(
+                        """
+                                INSERT INTO sports_cards (name, players_featured, rookie, team_name, sport, id_in_set, rarity, set_code, quantity, parallel, type)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                ON CONFLICT (sport, set_code, id_in_set, parallel)
+                                DO UPDATE SET
+                                    quantity = sports_cards.quantity + EXCLUDED.quantity;
+                                """,
+                        (
+                            record["name"],
+                            record["players_featured"],
+                            record["rookie"],
+                            record["team_name"],
+                            record["sport"],
+                            record["id_in_set"],
+                            record["rarity"],
+                            record["set_code"],
+                            record.get("quantity") or 1,
+                            record["parallel"],
+                            record["type"],
+                        ),
+                    )
+                conn.commit()
+    print("Bulk cards have been imported.")
+
+
 def display_card(search):
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -145,7 +205,7 @@ def display_card(search):
                 FROM tcg_cards
                 WHERE LOWER(name) LIKE LOWER(%s)
                 UNION ALL
-                SELECT name, sport, id_in_set, set_id, quantity, parallel AS style
+                SELECT name, sport, id_in_set, set_code, quantity, parallel AS style
                 FROM sports_cards
                 WHERE LOWER(name) LIKE LOWER(%s)
             )
@@ -177,7 +237,7 @@ def save_tcg_card(
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (category, set_id, id_in_set, variant)
                         DO UPDATE SET
-                            quantity = tcg_cards.quantity + 1
+                            quantity = tcg_cards.quantity + EXCLUDED.quantity;
                         """,
                 (
                     name,
@@ -196,19 +256,41 @@ def save_tcg_card(
 
 
 def save_sports_card(
-    name, sport, id_in_set, team_name, rookie, set_id, rarity, parallel
+    name,
+    players_featured,
+    sport,
+    id_in_set,
+    set_code,
+    team_name,
+    rookie,
+    rarity,
+    parallel,
+    type,
+    quantity,
 ):
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                        INSERT INTO sports_cards (name, sport, id_in_set, team_name, rookie, set_id, rarity, parallel, quantity)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 1)
-                        ON CONFLICT (sport, set_id, id_in_set, parallel)
+                        INSERT INTO sports_cards (name, players_featured, sport, id_in_set, set_code, team_name, rookie, rarity, parallel, type, quantity)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (sport, set_code, id_in_set, parallel)
                         DO UPDATE SET
-                            quantity = sports_cards.quantity + 1
+                            quantity = sports_cards.quantity + EXCLUDED.quantity
                         """,
-                (name, sport, id_in_set, team_name, rookie, set_id, rarity, parallel),
+                (
+                    name,
+                    players_featured,
+                    sport,
+                    id_in_set,
+                    set_code,
+                    team_name,
+                    rookie,
+                    rarity,
+                    parallel,
+                    type,
+                    quantity,
+                ),
             )
             conn.commit()
     print(f"{name.title()} has been successfully added to your Sports collection.")
@@ -231,8 +313,17 @@ def main():
             search = input("Enter the name of the card you are searching for: ")
             display_card(search)
         elif choice == "3":
+            print("\nBulk Import Menu: ")
+            print("1. TCG")
+            print("2. Sports")
+            bulk_choice = input(
+                "Enter choice above on what type of card you want to bulk import: "
+            )
             file_name = input("Enter the CSV filename (w/ extension): ")
-            bulk_import_tcg(file_name)
+            if bulk_choice == "1":
+                bulk_import_tcg(file_name)
+            elif bulk_choice == "2":
+                bulk_import_sports(file_name)
         elif choice == "4":
             break
         else:
