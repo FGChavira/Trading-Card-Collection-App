@@ -156,6 +156,26 @@ def init_db():
                 )
                 cur.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS collector_cards (
+                        id SERIAL PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        category TEXT NOT NULL,
+                        id_in_set TEXT,
+                        description TEXT,
+                        rarity TEXT,
+                        set_code TEXT NOT NULL,
+                        condition TEXT DEFAULT 'Near Mint',
+                        variant TEXT DEFAULT 'Standard',
+                        quantity INTEGER DEFAULT 1,
+                        acquired_on TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        grade TEXT DEFAULT 'N/A',
+                        grading_company TEXT DEFAULT 'N/A',
+                        CONSTRAINT unique_collector_card UNIQUE (category, set_code, id_in_set, variant)
+                    )
+                    """
+                )
+                cur.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS sets (
                         id SERIAL,
                         set_code TEXT PRIMARY KEY,
@@ -184,7 +204,8 @@ def add_card():
     print("\nAdd Card Menu")
     print("1. TCG Card (Pokemon, One Piece)")
     print("2. Sports Card (Baseball, Football, Basketball)")
-    print("3. Back to menu")
+    print("3. Collector Card (Hazbin Hotel, etc.)")
+    print("4. Back to menu")
 
     choice = input("Select a value from the menu: ")
     if choice == "1":
@@ -257,6 +278,29 @@ def add_card():
             rarity,
             parallel,
             card_type,
+            grade,
+            grading_company,
+            quantity,
+        )
+    elif choice == "3":
+        category = input("Category (e.g. Hazbin Hotel): ")
+        name = input("Card Name: ")
+        id_in_set = input("ID in Set: ")
+        description = input("Card Description (can leave blank): ")
+        set_code = input("Set Code (HAZBIN-01, etc.): ")
+        rarity = input("Rarity: ") or "Common"
+        variant = input("Variant: ") or "Standard"
+        grade = input("Grade (leave blank for N/A): ") or "N/A"
+        grading_company = input("Grading Company (leave blank for N/A): ") or "N/A"
+        quantity = input("Quantity: ") or 1
+        save_collector_card(
+            name,
+            category,
+            id_in_set,
+            description,
+            set_code,
+            rarity,
+            variant,
             grade,
             grading_company,
             quantity,
@@ -419,11 +463,15 @@ def display_card(search: str):
                     SELECT name, sport, id_in_set, set_code, quantity, parallel AS style
                     FROM sports_cards
                     WHERE LOWER(name) LIKE LOWER(%s)
+                    UNION ALL
+                    SELECT name, category, id_in_set, set_code, quantity, variant AS style
+                    FROM collector_cards
+                    WHERE LOWER(name) LIKE LOWER(%s)
                 )
                 SELECT * FROM combined_results
                 ORDER BY (SUBSTRING(id_in_set FROM '\d+'))::INTEGER ASC NULLS LAST;
             """
-            cur.execute(query, (f"%{search}%", f"%{search}%"))
+            cur.execute(query, (f"%{search}%", f"%{search}%", f"%{search}%"))
 
             results = cur.fetchall()
 
@@ -558,6 +606,63 @@ def save_sports_card(
     print(f"{name.title()} has been successfully added to your Sports collection.")
 
 
+def save_collector_card(
+    name: str,
+    category: str,
+    id_in_set: str,
+    description: str,
+    set_code: str,
+    rarity: str,
+    variant: str,
+    grade: str,
+    grading_company: str,
+    quantity: int,
+):
+    """
+    Insert cards into collector table provided by add_card() function.
+    If card already present in collector_cards table, increment the existing card's quantity.
+
+    Args:
+        name (str): Name of the card.
+        category (str): Card game (e.g. Pokemon, One Piece)
+        id_in_set (str): Card number within the set.
+        description (str): Description of the card.
+        set_id (str): Name of the set.
+        rarity (str): Card rarity.
+        variant (str): Card variant (e.g. Standard, Holo, etc.).
+        grade (str): Card grade if graded, otherwise 'N/A'.
+        grading_company (str): Grading company if graded, otherwise 'N/A'.
+        quantity (int): Number of copies to add.
+    """
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO collector_cards (name, category, id_in_set, description, set_code, rarity, variant, grade, grading_company, quantity)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (category, set_code, id_in_set, variant)
+                DO UPDATE SET
+                    quantity = collector_cards.quantity + EXCLUDED.quantity;
+                """,
+                (
+                    name,
+                    category,
+                    id_in_set,
+                    description,
+                    set_code,
+                    rarity,
+                    variant,
+                    grade,
+                    grading_company,
+                    quantity,
+                ),
+            )
+            conn.commit()
+    print(
+        f"{name.title()} has been successfully added to your collector card collection."
+    )
+
+
 def main():
     """
     Main menu loop for user to select from.
@@ -582,14 +687,19 @@ def main():
             print("\nBulk Import Menu: ")
             print("1. TCG")
             print("2. Sports")
+            print("3. Collector Cards (not working yet...)")
             bulk_choice = input(
                 "Enter choice above on what type of card you want to bulk import: "
             )
+            if bulk_choice == "3":
+                break
             file_name = input("Enter the CSV filename (w/ extension): ")
             if bulk_choice == "1":
                 bulk_import_tcg(file_name)
             elif bulk_choice == "2":
                 bulk_import_sports(file_name)
+            # elif bulk_choice == "3":
+            # bulk_import_collectors(file_name)
         elif choice == "4":
             enrich_pokemon_cards()
         elif choice == "5":
