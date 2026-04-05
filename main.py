@@ -417,6 +417,43 @@ def bulk_import_sports(file_path):
     print("Bulk cards have been imported.")
 
 
+def bulk_import_collector(file_path):
+    """
+    Bulk import collector cards into collector_cards table using user provided .csv file.
+
+    Args:
+        file_path (str): File path to user provided .csv file containing card data.
+    """
+    with open(file_path, mode="r", encoding="utf-8-sig") as bulk_file:
+        reader = csv.DictReader(bulk_file)
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                for record in reader:
+                    cur.execute(
+                        """
+                        INSERT INTO collector_cards (name, category, id_in_set, description, rarity, set_code, quantity, variant, grade, grading_company)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (category, set_code, id_in_set, variant)
+                        DO UPDATE SET
+                            quantity = collector_cards.quantity + EXCLUDED.quantity;
+                        """,
+                        (
+                            record["name"],
+                            record["category"],
+                            record["id_in_set"],
+                            record["description"] or "",
+                            record["rarity"],
+                            record["set_code"],
+                            record.get("quantity") or 1,
+                            record["variant"],
+                            record.get("grade") or "N/A",
+                            record.get("grading_company") or "N/A",
+                        ),
+                    )
+                conn.commit()
+    print("Bulk cards have been imported.")
+
+
 def enrich_pokemon_cards():
     """
     Update existing Pokemon card details using PokemonTCG API.
@@ -721,19 +758,17 @@ def main():
             print("\nBulk Import Menu: ")
             print("1. TCG")
             print("2. Sports")
-            print("3. Collector Cards (not working yet...)")
+            print("3. Collector Cards")
             bulk_choice = input(
                 "Enter choice above on what type of card you want to bulk import: "
             )
-            if bulk_choice == "3":
-                continue
             file_name = input("Enter the CSV filename (w/ extension): ")
             if bulk_choice == "1":
                 bulk_import_tcg(file_name)
             elif bulk_choice == "2":
                 bulk_import_sports(file_name)
-            # elif bulk_choice == "3":
-            # bulk_import_collectors(file_name)
+            elif bulk_choice == "3":
+                bulk_import_collector(file_name)
         elif choice == "4":
             enrich_pokemon_cards()
         elif choice == "5":
