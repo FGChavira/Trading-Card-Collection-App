@@ -36,23 +36,37 @@ def _pokemon_api_headers() -> dict:
 
 
 def search_pokemon_card(
-    search_term: str, set_id: str = "", id_in_set: str = ""
+    search_term: str, set_code: str = "", id_in_set: str = ""
 ) -> dict | None:
     """
     Search for Pokemon card using PokemonTCG API and prompts user to select one.
 
     Args:
         search_term (str): The name of the card to search for.
-        set_id (str): Optional card's set name.
+        set_code (str): Optional card's set name.
         id_in_set (str): Optional card's number within the set.
 
     Returns:
-        dict | None: Dictionary containing card details (name, set_id, id_in_set, rarity,
+        dict | None: Dictionary containing card details (name, set_code, id_in_set, rarity,
                      description, card_type). Or None if no card is found.
     """
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT sets.name
+                FROM sets
+                WHERE sets.set_code = %s
+                """,
+                (set_code,),
+            )
+            record = cur.fetchone()
+            set_name = record[0] if record else ""
+
     q_parts = [f'name:"{search_term}"']
-    if set_id:
-        q_parts.append(f'set.name:"{set_id}"')
+    if set_name:
+        q_parts.append(f'set.name:"{set_name}"')
     if id_in_set:
         q_parts.append(f"number:{id_in_set}")
 
@@ -60,7 +74,7 @@ def search_pokemon_card(
         # Make an HTTP GET request to the PokemonTCG API
         resp = requests.get(
             f"{POKEMON_TCG_BASE_URL}/cards",
-            params={"q": " ".join(q_parts), "pageSize": 20},
+            params={"q": " ".join(q_parts), "pageSize": 100},
             headers=_pokemon_api_headers(),
         )
         resp.raise_for_status()
@@ -79,9 +93,9 @@ def search_pokemon_card(
     else:
         print(f"\nFound {len(cards)} result(s):")
         for i, card in enumerate(cards, 1):
-            set_name = card.get("set", {}).get("name", "Unknown")
+            display_set = card.get("set", {}).get("name", "Unknown")
             print(
-                f"{i}. {card['name']} | {set_name} | #{card['number']} | {card.get('rarity', 'N/A')}"
+                f"{i}. {card['name']} | {display_set} | #{card['number']} | {card.get('rarity', 'N/A')}"
             )
 
         choice = input("\nSelect a card number (0 to enter manually): ").strip()
@@ -93,9 +107,28 @@ def search_pokemon_card(
     if isinstance(card_type, list):
         card_type = "/".join(card_type)
 
+    api_set_name = selected.get("set", {}).get("name", "")
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT sets.set_code
+                FROM sets
+                WHERE sets.name = %s
+                """,
+                (api_set_name,),
+            )
+            record = cur.fetchone()
+            if record:
+                set_code = record[0]
+            else:
+                set_code = api_set_name
+                print(f"\tWatning: Set '{api_set_name}' not found in your sets table.")
+
     return {
         "name": selected["name"],
-        "set_id": selected.get("set", {}).get("name", ""),
+        "set_code": set_code,
         "id_in_set": selected["number"],
         "rarity": selected.get("rarity", ""),
         "description": selected.get("flavorText", ""),
@@ -120,14 +153,14 @@ def init_db():
                         description TEXT,
                         card_type TEXT,
                         rarity TEXT,
-                        set_id TEXT,
+                        set_code TEXT,
                         condition TEXT,
                         variant TEXT DEFAULT 'Standard',
                         quantity INTEGER DEFAULT 1,
                         acquired_on TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         grade TEXT DEFAULT 'N/A',
                         grading_company TEXT DEFAULT 'N/A',
-                        CONSTRAINT unique_tcg_card UNIQUE (category, set_id, id_in_set, variant)
+                        CONSTRAINT unique_tcg_card UNIQUE (category, set_code, id_in_set, variant)
                     )
                     """
                 )
@@ -177,14 +210,15 @@ def init_db():
                 cur.execute(
                     """
                     CREATE TABLE IF NOT EXISTS sets (
-                        id SERIAL,
-                        set_code TEXT PRIMARY KEY,
+                        id SERIAL PRIMARY KEY,
+                        set_code TEXT UNIQUE NOT NULL,
                         name TEXT NOT NULL,
                         category TEXT NOT NULL,
                         series TEXT DEFAULT 'N/A',
                         manufacturer TEXT,
-                        release_date DATE,
-                        total_cards INTEGER
+                        release_year SMALLINT,
+                        total_cards INTEGER,
+                        CONSTRAINT sets_unique UNIQUE (set_code, category)
                     )
                     """
                 )
@@ -220,11 +254,11 @@ def add_card():
             id_in_set = api_data["id_in_set"]
             description = api_data["description"]
             card_type = api_data["card_type"]
-            set_id = api_data["set_id"]
+            set_code = api_data["set_code"]
             rarity = api_data["rarity"]
             print(f"\nPre-filled from API:")
             print(f"  Name:       {name}")
-            print(f"  Set:        {set_id}")
+            print(f"  Set:        {set_code}")
             print(f"  ID in Set:  {id_in_set}")
             print(f"  Rarity:     {rarity}")
             print(f"  Type:       {card_type}")
@@ -233,7 +267,7 @@ def add_card():
             id_in_set = input("ID in Set: ")
             description = input("Card description (can leave blank): ")
             card_type = input("Type (can leave blank): ")
-            set_id = input("Set: ")
+            set_code = input("Set Code (2026-ME-ASC, 2025-SV-PRE, etc.): ")
             rarity = input("Rarity: ")
 
         variant = input("Variant: ") or "Standard"
@@ -246,7 +280,7 @@ def add_card():
             id_in_set,
             description,
             card_type,
-            set_id,
+            set_code,
             rarity,
             variant,
             grade,
@@ -292,7 +326,7 @@ def add_card():
         variant = input("Variant: ") or "Standard"
         grade = input("Grade (leave blank for N/A): ") or "N/A"
         grading_company = input("Grading Company (leave blank for N/A): ") or "N/A"
-        quantity = input("Quantity: ") or 1
+        quantity = int(input("Quantity: ") or 1)
         save_collector_card(
             name,
             category,
@@ -321,9 +355,9 @@ def bulk_import_tcg(file_path: str):
                 for record in reader:
                     cur.execute(
                         """
-                        INSERT INTO tcg_cards (name, category, id_in_set, rarity, set_id, quantity, variant, grade, grading_company)
+                        INSERT INTO tcg_cards (name, category, id_in_set, rarity, set_code, quantity, variant, grade, grading_company)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (category, set_id, id_in_set, variant)
+                        ON CONFLICT (category, set_code, id_in_set, variant)
                         DO UPDATE SET
                             quantity = tcg_cards.quantity + EXCLUDED.quantity;
                         """,
@@ -332,7 +366,7 @@ def bulk_import_tcg(file_path: str):
                             record["category"],
                             record["id_in_set"],
                             record["rarity"],
-                            record["set_id"],
+                            record["set_code"],
                             record.get("quantity") or 1,
                             record["variant"],
                             record.get("grade") or "N/A",
@@ -392,7 +426,7 @@ def enrich_pokemon_cards():
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, name, set_id, id_in_set
+                SELECT id, name, set_code, id_in_set
                 FROM tcg_cards 
                 WHERE LOWER(category) = 'pokemon'
                 ORDER BY id
@@ -407,9 +441,9 @@ def enrich_pokemon_cards():
     print(f"\nFound {len(records)} Pokemon card(s) to enrich.")
     updated = 0
 
-    for record_id, name, set_id, id_in_set in records:
-        print(f"\n--- {name} | Set: {set_id} | #{id_in_set} ---")
-        api_data = search_pokemon_card(name, set_id=set_id, id_in_set=id_in_set)
+    for record_id, name, set_code, id_in_set in records:
+        print(f"\n--- {name} | Set: {set_code} | #{id_in_set} ---")
+        api_data = search_pokemon_card(name, set_code=set_code, id_in_set=id_in_set)
         if not api_data:
             print("Skipping.")
             continue
@@ -420,13 +454,13 @@ def enrich_pokemon_cards():
                     cur.execute(
                         """
                         UPDATE tcg_cards
-                        SET name = %s, set_id = %s, id_in_set = %s,
+                        SET name = %s, set_code = %s, id_in_set = %s,
                             rarity = %s, description = %s, card_type = %s
                         WHERE id = %s
                         """,
                         (
                             api_data["name"],
-                            api_data["set_id"],
+                            api_data["set_code"],
                             api_data["id_in_set"],
                             api_data["rarity"],
                             api_data["description"],
@@ -436,7 +470,7 @@ def enrich_pokemon_cards():
                     )
                     conn.commit()
             print(
-                f"Updated: {api_data['name']} ({api_data['set_id']} #{api_data['id_in_set']})"
+                f"Updated: {api_data['name']} ({api_data['set_code']} #{api_data['id_in_set']})"
             )
             updated += 1
         except Exception as e:
@@ -456,7 +490,7 @@ def display_card(search: str):
         with conn.cursor() as cur:
             query = r"""
                 WITH combined_results AS (
-                    SELECT name, category, id_in_set, set_id, quantity, variant AS style
+                    SELECT name, category, id_in_set, set_code, quantity, variant AS style
                     FROM tcg_cards
                     WHERE LOWER(name) LIKE LOWER(%s)
                     UNION ALL
@@ -491,7 +525,7 @@ def save_tcg_card(
     id_in_set: str,
     description: str,
     card_type: str,
-    set_id: str,
+    set_code: str,
     rarity: str,
     variant: str,
     grade: str,
@@ -508,7 +542,7 @@ def save_tcg_card(
         id_in_set (str): Card number within the set.
         description (str): Description of the card.
         card_type (str): Type of card.
-        set_id (str): Name of the set.
+        set_code (str): Name of the set.
         rarity (str): Card rarity.
         variant (str): Card variant (e.g. Standard, Holo, etc.).
         grade (str): Card grade if graded, otherwise 'N/A'.
@@ -519,9 +553,9 @@ def save_tcg_card(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO tcg_cards (name, category, id_in_set, description, card_type, set_id, rarity, variant, grade, grading_company, quantity)
+                INSERT INTO tcg_cards (name, category, id_in_set, description, card_type, set_code, rarity, variant, grade, grading_company, quantity)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (category, set_id, id_in_set, variant)
+                ON CONFLICT (category, set_code, id_in_set, variant)
                 DO UPDATE SET
                     quantity = tcg_cards.quantity + EXCLUDED.quantity;
                 """,
@@ -531,7 +565,7 @@ def save_tcg_card(
                     id_in_set,
                     description,
                     card_type,
-                    set_id,
+                    set_code,
                     rarity,
                     variant,
                     grade,
@@ -627,7 +661,7 @@ def save_collector_card(
         category (str): Card game (e.g. Pokemon, One Piece)
         id_in_set (str): Card number within the set.
         description (str): Description of the card.
-        set_id (str): Name of the set.
+        set_code (str): Name of the set.
         rarity (str): Card rarity.
         variant (str): Card variant (e.g. Standard, Holo, etc.).
         grade (str): Card grade if graded, otherwise 'N/A'.
@@ -692,7 +726,7 @@ def main():
                 "Enter choice above on what type of card you want to bulk import: "
             )
             if bulk_choice == "3":
-                break
+                continue
             file_name = input("Enter the CSV filename (w/ extension): ")
             if bulk_choice == "1":
                 bulk_import_tcg(file_name)
