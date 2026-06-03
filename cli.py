@@ -127,7 +127,8 @@ def main():
         print("2. Find a card")
         print("3. Bulk import cards (csv)")
         print("4. Enrich Pokemon cards via API")
-        print("5. Exit")
+        print("5. Track Complete/Master Set Count")
+        print("6. Exit")
 
         choice = input("Enter your choice: ")
 
@@ -154,6 +155,9 @@ def main():
         elif choice == "4":
             api.enrich_pokemon_cards()
         elif choice == "5":
+            search = input("Enter the name of the set you want to look at.")
+            db.display_set(search)
+        elif choice == "6":
             break
         else:
             print("Invalid choice. Please enter a valid selection.")

@@ -145,6 +145,118 @@ def display_card(search: str):
                     f"{card[0]} ({card[1]}) \nID: {card[2]} \nSet: {card[3]} \nVariant: {card[5]} \nQuantity: {card[4]}\n"
                 )
 
+def display_set(search: str):
+    """
+    Display owned cards all within a set.
+
+    Args:
+        search (str): Name of trading card set.
+    """
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            query = r"""
+                SELECT tcg.id_in_set, tcg.name, tcg.variant, tcg.condition, tcg.quantity
+                FROM tcg_cards tcg
+                JOIN sets ON tcg.set_code = sets.set_code
+                WHERE LOWER(sets.name) = LOWER(%s)
+                ORDER BY (SUBSTRING(id_in_set FROM '\d+'))::INTEGER ASC NULLS LAST;
+            """
+            count_query = r"""
+                SELECT COUNT(*)
+                FROM (
+                    SELECT DISTINCT id_in_set
+                    FROM tcg_cards tcg
+                    JOIN sets ON tcg.set_code = sets.set_code
+                    WHERE LOWER(sets.name) = LOWER(%s)
+                    AND variant IN ('Standard', 'Holo')
+                ) AS distinct_cards
+                """
+            master_count_query = r"""
+                SELECT COUNT(*)
+                FROM (
+                    SELECT DISTINCT id_in_set, variant
+                    FROM tcg_cards tcg
+                    JOIN sets ON tcg.set_code = sets.set_code
+                    WHERE LOWER(sets.name) = LOWER(%s)
+                    AND variant NOT IN ('Stamped', 'Promo')
+                ) AS distinct_cards
+                """
+            cur.execute(query, (search,))
+            results = cur.fetchall()
+
+            cur.execute(count_query, (search,))
+            count_result = cur.fetchone()
+            count = count_result[0] if count_result else 0
+
+            cur.execute(master_count_query, (search,))
+            master_count_result = cur.fetchone()
+            master_count = master_count_result[0] if master_count_result else 0
+
+            if not results:
+                print(f"You own no cards within {search}.")
+                return
+            
+            COMPLETE_SET_COUNTS = {
+                'Battle Styles': 183
+                ,'Chilling Reign': 233
+                ,'Evolving Skies': 237
+                ,'Fusion Strike': 284
+                ,'Brilliant Stars': 195
+                ,'Lost Origin': 217
+                ,'Silver Tempest': 357
+                ,'Scarlet & Violet': 258
+                ,'Paldea Evolved': 279
+                ,'Obsidian Flames': 230
+                ,'151': 207
+                ,'Paradox Rift': 266 
+                ,'Paldean Fates': 245
+                ,'Temporal Forces': 218 
+                ,'Twilight Masquerade': 226
+                ,'Shrouded Fable': 99
+                ,'Surging Sparks': 252
+                ,'Prismatic Evolutions': 180
+                ,'Journey Together': 190
+                ,'Destined Rivals': 244 
+                ,'Black Bolt': 172
+                ,'White Flare':  173
+                ,'Mega Evolution':  188
+                ,'Phantasmal Flames': 130
+                ,'Ascended Heroes': 295
+                ,'Perfect Order': 124
+                ,'Chaos Rising': 122
+            }
+            MASTER_COUNTS = {
+                'Battle Styles': 306
+                ,'Chilling Reign': 369
+                ,'Evolving Skies': 369
+                ,'Fusion Strike': 501
+                ,'Brilliant Stars': 504
+                ,'Lost Origin': 396
+                ,'Silver Tempest': 420
+                ,'Scarlet & Violet': 360
+                ,'Paldea Evolved': 455
+                ,'Obsidian Flames': 406
+                ,'151': 360
+                ,'Paradox Rift': 428
+                ,'Paldean Fates': 326
+                ,'Temporal Forces': 358
+                ,'Twilight Masquerade': 373
+                ,'Shrouded Fable': 154
+                ,'Surging Sparks': 417
+                ,'Prismatic Evolutions': 280
+                ,'Journey Together': 333
+                ,'Destined Rivals': 409
+                ,'Black Bolt': 252
+                ,'White Flare':  253
+                ,'Mega Evolution':  310
+                ,'Phantasmal Flames': 214
+                ,'Ascended Heroes': 613
+                ,'Perfect Order': 203
+                ,'Chaos Rising': 198
+            }
+            print(f"\nFound {count} unique cards in {search} set.\nYou need {COMPLETE_SET_COUNTS[search] - count} more unique cards to complete this set!")
+            print(f"\nFound {master_count} unique cards, including special variants in {search} set.\nYou need {MASTER_COUNTS[search] - master_count} more cards to master this set!")
+
 
 def save_tcg_card(
     name: str,
