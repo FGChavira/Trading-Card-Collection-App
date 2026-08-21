@@ -3,6 +3,140 @@ import api as api
 import bulk_import as bi
 
 
+def search_pokemon_sets(search_term: str = "") -> list:
+    """
+    Search for Pokemon sets in the database.
+    
+    Args:
+        search_term (str): Optional term to filter sets. If empty, returns all Pokemon sets.
+    
+    Returns:
+        list: List of tuples containing (set_code, name).
+    """
+    with db.get_connection() as conn:
+        with conn.cursor() as cur:
+            if search_term:
+                cur.execute(
+                    """
+                    SELECT DISTINCT set_code, name
+                    FROM sets
+                    WHERE LOWER(category) = 'pokemon'
+                    AND (LOWER(name) LIKE LOWER(%s) OR LOWER(set_code) LIKE LOWER(%s))
+                    ORDER BY name
+                    """,
+                    (f"%{search_term}%", f"%{search_term}%"),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT DISTINCT set_code, name
+                    FROM sets
+                    WHERE LOWER(category) = 'pokemon'
+                    ORDER BY name
+                    """
+                )
+            return cur.fetchall()
+
+
+def select_pokemon_set() -> tuple | None:
+    """
+    Allow user to search for and select a Pokemon set.
+    
+    Returns:
+        tuple | None: Tuple of (set_code, set_name) or None if user cancels.
+    """
+    search_term = input("\nSearch for a Pokemon set (partial name/code, or press Enter to see all): ").strip()
+    sets = search_pokemon_sets(search_term)
+    
+    if not sets:
+        print("No sets found.")
+        return None
+    
+    if len(sets) == 1:
+        set_code, set_name = sets[0]
+        print(f"Selected: {set_name} ({set_code})")
+        return (set_code, set_name)
+    
+    print(f"\nFound {len(sets)} set(s):")
+    for i, (code, name) in enumerate(sets, 1):
+        print(f"{i}. {name} ({code})")
+    
+    choice = input("\nSelect a set number (0 to cancel): ").strip()
+    if not choice.isdigit() or int(choice) == 0 or int(choice) > len(sets):
+        return None
+    
+    set_code, set_name = sets[int(choice) - 1]
+    return (set_code, set_name)
+
+
+def add_pokemon_batch():
+    """
+    Add multiple Pokemon cards from selected set(s) in a batch.
+    Allows user to search for and add multiple cards without returning to menu.
+    """
+    print("\n=== Add Multiple Pokemon ===")
+    
+    while True:
+        # Select a set
+        set_info = select_pokemon_set()
+        if not set_info:
+            break
+        
+        set_code, set_name = set_info
+        
+        # Loop to add multiple cards from this set
+        while True:
+            card_name = input(f"\nEnter Pokemon name to add from {set_name} (or press Enter to change set): ").strip()
+            if not card_name:
+                break
+            
+            api_data = api.search_pokemon_card(card_name, set_code=set_code)
+            
+            if api_data:
+                name = api_data["name"]
+                id_in_set = api_data["id_in_set"]
+                description = api_data["description"]
+                card_type = api_data["card_type"]
+                set_code_result = api_data["set_code"]
+                rarity = api_data["rarity"]
+                print(f"\nPre-filled from API:")
+                print(f"  Name:       {name}")
+                print(f"  Set:        {set_code_result}")
+                print(f"  ID in Set:  {id_in_set}")
+                print(f"  Rarity:     {rarity}")
+                print(f"  Type:       {card_type}")
+            else:
+                print("Could not find card via API. Skipping.")
+                continue
+            
+            variant = input("Variant: ") or "Standard"
+            grade = input("Grade (leave blank for N/A): ") or "N/A"
+            grading_company = input("Grading Company (leave blank for N/A): ") or "N/A"
+            quantity = int(input("Quantity: ") or 1)
+            
+            db.save_tcg_card(
+                name,
+                "Pokemon",
+                id_in_set,
+                description,
+                card_type,
+                set_code_result,
+                rarity,
+                variant,
+                grade,
+                grading_company,
+                quantity,
+            )
+            print(f"Added {quantity}x {name}")
+        
+        # Ask if user wants to add from another set
+        another_set = input("\nAdd cards from another set? (y/n): ").lower()
+        if another_set != 'y':
+            break
+    
+    print("\nFinished adding Pokemon.")
+
+
 def add_card():
     """
     Add individual card using details provided by user input.
@@ -20,6 +154,13 @@ def add_card():
     if choice == "1":
         category = input("Category (e.g. Pokemon, One Piece): ")
 
+        if category.lower() == "pokemon":
+            multiple = input("Are you adding multiple Pokemon? (y/n): ").lower()
+            if multiple == 'y':
+                add_pokemon_batch()
+                return
+        
+        # Single card flow
         api_data = None
         if category.lower() == "pokemon":
             api_data = api.search_pokemon_card(input("Card name to search: "))

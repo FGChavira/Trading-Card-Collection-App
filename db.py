@@ -2,9 +2,12 @@ import psycopg2
 import os
 from dotenv import load_dotenv
 
+from contextlib import contextmanager
+import psycopg2.extras
+from psycopg2 import pool
+
 load_dotenv()
 
-import db as db
 
 DB_CONFIG = {
     "host": os.getenv("DB_HOST", "localhost"),
@@ -14,12 +17,41 @@ DB_CONFIG = {
     "password": os.getenv("DB_PASSWORD"),
 }
 
+_connection_pool = None
 
+def _get_pool():
+    """
+    Return the shared connection pool, creating it on first use.
+    """
+    global _connection_pool
+    if _connection_pool is None:
+        _connection_pool = pool.ThreadedConnectionPool(
+            minconn=int(os.getenv("DB_POOL_MIN", "1")),
+            maxconn=int(os.getenv("DB_POOL_MAX", "10")),
+            **DB_CONFIG,
+        )
+    return _connection_pool
+
+
+@contextmanager
 def get_connection():
     """
-    Connect to database using DB_CONFIG parameters.
+    Borrow a connection from the pool and return it when done.
+
+    Used as a context manager: with get_connection() as conn: ...
+    The connection is returned to the pool (not closed) on exit.
     """
-    return psycopg2.connect(**DB_CONFIG)
+    pool_ = _get_pool()
+    conn = pool_.getconn()
+    try:
+        yield conn
+    finally:
+        pool_.putconn(conn)
+
+    # """
+    # Connect to database using DB_CONFIG parameters.
+    # """
+    # return psycopg2.connect(**DB_CONFIG)
 
 
 def init_db():
@@ -96,7 +128,8 @@ def init_db():
                         series TEXT DEFAULT 'N/A',
                         manufacturer TEXT,
                         release_year SMALLINT,
-                        total_cards INTEGER,
+                        complete_set_size INTEGER,
+                        master_set_size INTEGER,
                         CONSTRAINT sets_unique UNIQUE (set_code, category)
                     )
                     """)
@@ -145,10 +178,30 @@ def display_card(search: str):
                     f"{card[0]} ({card[1]}) \nID: {card[2]} \nSet: {card[3]} \nVariant: {card[5]} \nQuantity: {card[4]}\n"
                 )
 
+def _fetch_set_counts(cur, set_name: str):
+    """
+    Look up the official complete-set and master-set totals from the sets table.
+
+    Return (complete_set_size, master_set_size) or (None, None) if the set is unknown.
+    """
+    cur.execute(
+        """
+        SELECT complete_set_size, master_set_size
+        FROM sets
+        WHERE LOWER(name) = LOWER(%s)
+        """,
+        (set_name,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None, None
+    return row[0], row[1]
+
 def display_set(search: str):
     """
-    Display owned cards all within a set.
+    Display owned cards all within a set and progress towards completing/mastering it.
 
+    Set totals are read from the sets table (complete_set_size, master_set_size) rather than hardcoded.
     Args:
         search (str): Name of trading card set.
     """
@@ -184,79 +237,35 @@ def display_set(search: str):
             cur.execute(query, (search,))
             results = cur.fetchall()
 
-            cur.execute(count_query, (search,))
-            count_result = cur.fetchone()
-            count = count_result[0] if count_result else 0
-
-            cur.execute(master_count_query, (search,))
-            master_count_result = cur.fetchone()
-            master_count = master_count_result[0] if master_count_result else 0
-
             if not results:
                 print(f"You own no cards within {search}.")
                 return
             
-            COMPLETE_SET_COUNTS = {
-                'Battle Styles': 183
-                ,'Chilling Reign': 233
-                ,'Evolving Skies': 237
-                ,'Fusion Strike': 284
-                ,'Brilliant Stars': 195
-                ,'Lost Origin': 217
-                ,'Silver Tempest': 357
-                ,'Scarlet & Violet': 258
-                ,'Paldea Evolved': 279
-                ,'Obsidian Flames': 230
-                ,'151': 207
-                ,'Paradox Rift': 266 
-                ,'Paldean Fates': 245
-                ,'Temporal Forces': 218 
-                ,'Twilight Masquerade': 226
-                ,'Shrouded Fable': 99
-                ,'Surging Sparks': 252
-                ,'Prismatic Evolutions': 180
-                ,'Journey Together': 190
-                ,'Destined Rivals': 244 
-                ,'Black Bolt': 172
-                ,'White Flare':  173
-                ,'Mega Evolution':  188
-                ,'Phantasmal Flames': 130
-                ,'Ascended Heroes': 295
-                ,'Perfect Order': 124
-                ,'Chaos Rising': 122
-            }
-            MASTER_COUNTS = {
-                'Battle Styles': 306
-                ,'Chilling Reign': 369
-                ,'Evolving Skies': 369
-                ,'Fusion Strike': 501
-                ,'Brilliant Stars': 504
-                ,'Lost Origin': 396
-                ,'Silver Tempest': 420
-                ,'Scarlet & Violet': 360
-                ,'Paldea Evolved': 455
-                ,'Obsidian Flames': 406
-                ,'151': 360
-                ,'Paradox Rift': 428
-                ,'Paldean Fates': 326
-                ,'Temporal Forces': 358
-                ,'Twilight Masquerade': 373
-                ,'Shrouded Fable': 154
-                ,'Surging Sparks': 417
-                ,'Prismatic Evolutions': 280
-                ,'Journey Together': 333
-                ,'Destined Rivals': 409
-                ,'Black Bolt': 252
-                ,'White Flare':  253
-                ,'Mega Evolution':  310
-                ,'Phantasmal Flames': 214
-                ,'Ascended Heroes': 613
-                ,'Perfect Order': 203
-                ,'Chaos Rising': 198
-            }
-            print(f"\nFound {count} unique cards in {search} set.\nYou need {COMPLETE_SET_COUNTS[search] - count} more unique cards to complete this set!")
-            print(f"\nFound {master_count} unique cards, including special variants in {search} set.\nYou need {MASTER_COUNTS[search] - master_count} more cards to master this set!")
+            cur.execute(count_query, (search,))
+            count_result = cur.fetchone()[0]
 
+            cur.execute(master_count_query, (search,))
+            master_count_result = cur.fetchone()[0]
+
+            complete_set_size, master_set_size = _fetch_set_counts(cur, search)
+
+            if complete_set_size is None:
+                print(
+                    f"\nYou own {count_result} unique cards in {search}, but this set "
+                    f"isn't in your sets table yet, so completion cannot be calculated."
+                )
+                return
+            print(
+                f"\nYou own {count_result} unique cards in {search}."
+                f"\nYou need {complete_set_size - count_result} more to complete the set!"
+            )
+
+            if master_set_size is not None:
+                print(
+                    f"\nIncluding special variants, you own {master_count_result} unique cards."
+                    f"You need {master_set_size - master_count_result} more to master the set!"
+                )
+            
 
 def save_tcg_card(
     name: str,
@@ -434,3 +443,78 @@ def save_collector_card(
     print(
         f"{name.title()} has been successfully added to your collector card collection."
     )
+
+
+def search_cards(search: str, limit: int = 50, offset: int = 0):
+    """
+    Search all three card tables by (partial) name and return rows as dicts.
+
+    Args:
+        search (str): Partial or full card name.
+        limit (int): Max rows to return.
+        offset (int): Rows to skip (for pagination).
+
+    Returns:
+        list[dict]: Matching cards with a unified shape.
+    """
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                r"""
+                WITH combined_results AS (
+                    SELECT  name, category AS group_name, id_in_set, set_code, quantity,
+                            variant AS style, 'tcg' AS source
+                    FROM    tcg_cards
+                    WHERE   LOWER(name) LIKE LOWER(%(term)s)
+                    UNION ALL
+                    SELECT  name, sport AS group_name, id_in_set, set_code, quantity, 
+                            parallel AS style, 'sports' AS source
+                    FROM    sports_cards
+                    WHERE   LOWER(name) LIKE LOWER(%(term)s)
+                )
+                
+                SELECT * FROM combined_results
+                ORDER BY (SUBSTRING(id_in_set FROM '\d+'))::INTEGER ASC NULLS LAST
+                LIMIT %(limit)s OFFSET %(offset)s;
+                """,
+                {"term": f"%{search}%", "limit": limit, "offset": offset},
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+def get_card(source: str, category: str, set_name: str,id_in_set: str):
+    """
+    Fetch a single card, uniquely identified by its source table, category/sport, 
+    set name, and id_in_set.
+
+    Args:
+        source (str): One of 'tcg', sports', or 'collector'.
+        category (str): Category (tcg/collector) or sport (sports).
+        set_name (str): Human set name, e.g. 'Prismatic Evolutions'.
+        id_in_set (str): Card number within the set.
+
+    Returns:
+        dict | None: The card row, or None if not found.
+    """
+    tables = {
+        "tcg": ("tcg_cards", "category"),
+        "sports": ("sports_cards", "sport"),
+        "collector": ("collector_cards", "category"),
+    }
+    if source not in tables:
+        raise ValueError(f"Unknown card source '{source}'.")
+    table, group_col = tables[source]
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                SELECT  tab.*
+                FROM    {table} as tab
+                JOIN    sets ON tab.set_code = sets.set_code
+                WHERE   LOWER(tab.{group_col}) = LOWER(%s)
+                 AND    LOWER(sets.name) = LOWER(%s)
+                 AND    tab.id_in_set = %s
+                """,
+                (category, set_name, id_in_set),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
