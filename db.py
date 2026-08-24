@@ -462,15 +462,19 @@ def search_cards(search: str, limit: int = 50, offset: int = 0):
             cur.execute(
                 r"""
                 WITH combined_results AS (
-                    SELECT  name, category AS group_name, id_in_set, set_code, quantity,
-                            variant AS style, 'tcg' AS source
-                    FROM    tcg_cards
-                    WHERE   LOWER(name) LIKE LOWER(%(term)s)
+                    SELECT  tcg.name, tcg.category AS group_name, tcg.id_in_set, tcg.set_code, tcg.quantity,
+                            tcg.variant AS style, 'tcg' AS source,
+                            sets.name AS set_name
+                    FROM    tcg_cards tcg
+                    LEFT JOIN sets ON tcg.set_code = sets.set_code
+                    WHERE   LOWER(tcg.name) LIKE LOWER(%(term)s)
                     UNION ALL
-                    SELECT  name, sport AS group_name, id_in_set, set_code, quantity, 
-                            parallel AS style, 'sports' AS source
-                    FROM    sports_cards
-                    WHERE   LOWER(name) LIKE LOWER(%(term)s)
+                    SELECT  spo.name, spo.sport AS group_name, spo.id_in_set, spo.set_code, spo.quantity, 
+                            spo.parallel AS style, 'sports' AS source,
+                            sets.name AS set_name
+                    FROM    sports_cards spo
+                    LEFT JOIN sets ON spo.set_code = sets.set_code
+                    WHERE   LOWER(spo.name) LIKE LOWER(%(term)s)
                 )
                 
                 SELECT * FROM combined_results

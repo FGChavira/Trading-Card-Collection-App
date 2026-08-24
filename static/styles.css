@@ -1,0 +1,40 @@
+.border-test {
+    border: 1px solid black;
+}
+
+#homepage-title {
+    font-family: "Abril Fatface", serif;
+    text-align: center;
+    font-size: 3em;
+}
+
+.form-control {
+    font-family: "Cutive Mono", serif;
+    letter-spacing: -1.5px;
+}
+
+table {
+    width: 100%;
+    table-layout: fixed;
+}
+
+tbody {
+    font-family: "Cutive Mono", serif;
+    letter-spacing: -1px;
+}
+
+thead {
+    font-family: "Cutive Mono", serif;
+    letter-spacing: -1.5px;
+    font-size: 18px;
+    letter-spacing: -1.5px;
+}
+
+button {
+    font-family: "Cutive Mono", serif !important;
+    letter-spacing: -1px;
+}
+
+body {
+    background-color: #eee7d7 !important;
+}

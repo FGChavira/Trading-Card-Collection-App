@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Card Tracker</title>
+
+    <link href="../static/styles.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Abril+Fatface&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cutive+Mono&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container my-4">
+        <h1 id="homepage-title" class="mb-4">Trading Card Tracker</h1>
+
+        {# A form is how a browser collects user input and sends it to the server.
+           method="get" -> submit as a GET request (term goes in the URL).
+           action="/" -> send it to the "/" route (our home view).
+           The "d-flex" and "mb-4" are Bootstrap: lay children in a row, add margin below. #}
+        <form method="get" action="/" class="d-flex mb-4">
+            {# name="search" is CRITICAL - it's the label Flask reads on the other side.
+               request.args.get("search") matches THIS name. They must be identical.
+               value="{{ search }}" pre-fills the box with the current search term.
+               "form-control" is Bootstrap's styling for text inputs.#}
+            <input
+                type="text"
+                name="search"
+                value="{{ search }}"
+                placeholder="Search by card name..."
+                class="form-control me-2">
+            {# A submit button sends the form. "btn btn-primary" is Bootstrap's
+            blue button styling. me-2 on the input adds spacing between them.#}
+            <button type="submit" class="btn btn-primary">Search</button>
+        </form>
+
+        <table class="table table-striped table-hover table-bordered">
+             <thead class="table-dark">
+                <tr>
+                    <th>Name</th>
+                    <th>Category</th>
+                    <th>ID in Set</th>
+                    <th>Set</th>
+                    <th>Style</th>
+                    <th>Quantity</th>
+                </tr>
+            </thead>
+
+            {# Jinja2 "for" loop. Note the different bracket style:
+                {% ... %} is for LOGIC (loops, if-statements),
+                {{ ... }} is for OUTPUTTING a value.
+                This loop runs once per card in the list. #}
+
+            <tbody>
+                {% for card in cards %}
+                <tr>
+                    <td>{{ card.name }}</td>
+                    <td>{{ card.group_name }}</td>
+                    <td>{{ card.id_in_set }}</td>
+                    <td>{{ card.set_name }}</td>
+                    <td>{{ card.style }}</td>
+                    <td>{{ card.quantity }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>
